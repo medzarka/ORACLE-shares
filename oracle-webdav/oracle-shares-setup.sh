@@ -58,7 +58,7 @@ ROOT_PASSWORD=$(cat /root/secret_root.txt)
 ABC_PASSWORD=$(cat /root/secret_abc.txt)
 echo "Update root password ..."
 echo "root:$ROOT_PASSWORD" | chpasswd
-echo "Update root password ..."
+echo "Update abc password ..."
 echo "abc:$ABC_PASSWORD" | chpasswd
 
 ## ------------------------------------------------------------------------
@@ -222,10 +222,10 @@ apk --no-cache add rclone
 # generate a password for rclone/config
 rclone config
 # configure the backup server, and protect the configuration with the generated password
-cat <<EOF > /etc/periodic/daily/rclone-sync
+at <<EOF > /etc/periodic/daily/rclone-sync
 #!/bin/sh
 /usr/bin/rclone sync -v --ask-password=false --ignore-size --create-empty-src-dirs --log-file /var/log/rclone.log /var/lib/dav pcloud:/SyncCloud/myServers/OracleCloud/shares/
-EOF
+EOFc
 chmod a+x /etc/periodic/daily/rclone-sync
 run-parts --test /etc/periodic/daily # to check
 
