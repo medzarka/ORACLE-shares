@@ -8,8 +8,6 @@ To solve this issue, we install Alpine linux which is much lighter.
 
 ### Steps
 
-#### Version 1.0
-
 - S1 - Install Alpine 3.19 inplace of Ubuntu 22.04
 - S2 - Connect to the root user
 - S3 - Update the system
@@ -18,7 +16,7 @@ To solve this issue, we install Alpine linux which is much lighter.
 - S6 - Update user's password
 - S7 - Configure the firewall
 - S8 - Hardening the SSH service access
-- S9 - Diable IPv6
+- S9 - Disable IPv6
 - S10 - Configure doas
 - S11 - Install webdav with apache ...
 - S12 - Install and configure Rclone
