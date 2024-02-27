@@ -43,7 +43,7 @@ apk upgrade --no-cache --available
 ## ------------------------------------------------------------------------
 # [x] S4 - Install required packages
 echo "Install required softwares ..."
-apk --no-cache add neofetch htop chrony doas tzdata nano 
+apk --no-cache add neofetch htop chrony doas tzdata nano sudo bash
 
 ## ------------------------------------------------------------------------
 # [x] S5 - Configure NTP
@@ -124,94 +124,113 @@ sysctl -p /etc/sysctl.d/99-disable-ipv6.conf # to apply the modifications for th
 #  !!!! Please to consider only one option
 
 # ------------ no password required ------------
-# for sudo --> echo '%wheel ALL=(ALL) NOPASSWD: ALL' > "/etc/sudoers.d/wheel"
-#echo 'permit nopass :wheel' > "/etc/doas.d/wheel.conf"
-#echo 'permit nopass keepenv root as root' >> "/etc/doas.d/wheel.conf"
+# for sudo --> 
+echo '%wheel ALL=(ALL) NOPASSWD: ALL' > "/etc/sudoers.d/wheel"
+# for doas --> 
+echo 'permit nopass :wheel' > "/etc/doas.d/wheel.conf"
+echo 'permit nopass keepenv root as root' >> "/etc/doas.d/wheel.conf"
 
 # ------------ with required user password ------------
-# for sudo --> echo '%wheel ALL=(ALL) ALL' > "/etc/sudoers.d/wheel"
-echo 'permit persist :wheel' > "/etc/doas.d/wheel.conf"
-echo 'permit persist keepenv root as root' >> "/etc/doas.d/wheel.conf"
+# for sudo --> 
+#echo '%wheel ALL=(ALL) ALL' > "/etc/sudoers.d/wheel"
+# for doas --> 
+#echo 'permit persist :wheel' > "/etc/doas.d/wheel.conf"
+#echo 'permit persist keepenv root as root' >> "/etc/doas.d/wheel.conf"
 
 ## ------------------------------------------------------------------------
-# [x] S11 - Install webdav with apache ...
+# [x] S11 - Install webdav with nginx ...
 # First step, create a password from PVE01 using the pass manager and put it in the file as follows.
 WEBDAV_USERNAME=webdav
 WEBDAV_PASSWORD=$(cat /root/secret_webdav.txt)
-apk add  --no-cache apache2-webdav apache2-utils apache2-ssl 
-mkdir -p /var/lib/dav 
-chown apache:apache /var/lib/dav 
-chmod 755 /var/lib/dav
-htpasswd -cb /etc/apache2/webdav.password $WEBDAV_USERNAME $WEBDAV_PASSWORD
 
-cat << EOF > /etc/apache2/conf.d/dav.conf
-# Distributed authoring and versioning (WebDAV)
-#
-# Required modules: mod_alias, mod_auth_digest, mod_authn_core, mod_authn_file,
-#                   mod_authz_core, mod_authz_user, mod_dav, mod_dav_fs,
-#                   mod_setenvif
-LoadModule auth_digest_module modules/mod_auth_digest.so
-LoadModule dav_module modules/mod_dav.so
-LoadModule dav_fs_module modules/mod_dav_fs.so
+#apk del nginx apache2-utils
+apk add nginx apache2-utils
 
-# The User/Group specified in httpd.conf needs to have write permissions
-# on the directory where the DavLockDB is placed and on any directory where
-# "Dav On" is specified.
+openssl req -x509 -nodes -days 365 -newkey rsa:4096 -keyout /etc/ssl/private/nginx-selfsigned.key -out /etc/ssl/certs/nginx-selfsigned.crt \
+-subj "/C=SA/ST=Lima/L=Lima/O=Acme Inc. /OU=LAB/CN=acme.com"
+openssl dhparam -out /etc/nginx/dhparam.pem 4096
 
-DavLockDB /var/lib/dav/lockdb
-
-Alias /webdav /var/lib/dav
-<Location /webdav/>
-    DAV on
-    Options +Indexes
-    AuthType Basic
-    AuthName "webdav"
-    AuthUserFile /etc/apache2/webdav.password
-    Require valid-user
-</Location>
-
-<Directory /var/lib/dav/>
-    Options Indexes FollowSymLinks
-    AllowOverride None
-    Require all granted
-</Directory>
-
-# The following directives disable redirects on non-GET requests for
-# a directory that does not include the trailing slash.  This fixes a
-# problem with several clients that do not appropriately handle
-# redirects for folders with DAV methods.
-#
-BrowserMatch "Microsoft Data Access Internet Publishing Provider" redirect-carefully
-BrowserMatch "MS FrontPage" redirect-carefully
-BrowserMatch "^WebDrive" redirect-carefully
-BrowserMatch "^WebDAVFS/1.[01234]" redirect-carefully
-BrowserMatch "^gnome-vfs/1.0" redirect-carefully
-BrowserMatch "^XML Spy" redirect-carefully
-BrowserMatch "^Dreamweaver-WebDAV-SCM1" redirect-carefully
-BrowserMatch " Konqueror/4" redirect-carefully
+mkdir -p /etc/nginx/snippets
+tee /etc/nginx/snippets/self-signed.conf >/dev/null <<EOF
+ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
 EOF
-chown root:apache /etc/apache2/webdav.password
-chmod 640 /etc/apache2/webdav.password
 
-# Create the is_mounted file.
-# This file is used by client to test if the folder is weel mounted or not.
-# This file will be accessible for read only (0400).
-touch /var/lib/dav/is_mounted
-chmod 400 /var/lib/dav/is_mounted
+tee /etc/nginx/snippets/ssl-params.conf >/dev/null <<EOF
+ssl_protocols TLSv1.3;
+ssl_prefer_server_ciphers on;
+ssl_dhparam /etc/nginx/dhparam.pem; 
+ssl_ciphers EECDH+AESGCM:EDH+AESGCM;
+ssl_ecdh_curve secp384r1;
+ssl_session_timeout  10m;
+ssl_session_cache shared:SSL:2m;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+# Disable strict transport security for now. You can uncomment the following
+# line if you understand the implications.
+#add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+add_header X-Frame-Options DENY;
+add_header X-Content-Type-Options nosniff;
+add_header X-XSS-Protection "1; mode=block";
+EOF
 
-#htdigest -c /usr/user.passwd DAV-upload ${WEBDAV_USERNAME}
-rc-update add apache2
-rc-service apache2 start
+mkdir -p /data
+chown -R nginx:nginx /data
+tee /etc/nginx/http.d/default.conf >/dev/null <<EOF
+server {
+    listen 443 ssl;
+
+    include snippets/self-signed.conf;
+    include snippets/ssl-params.conf;
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log info;
+
+    client_max_body_size 0;
+
+    location / {
+        root /data/;
+        autoindex on;
+
+        dav_methods PUT DELETE MOVE;
+        dav_access user:rw group:rw all:r;
+
+        auth_basic "Restricted";
+    	auth_basic_user_file /etc/nginx/htpasswd;
+    }
+}
+server {
+    listen 80;
+    return 301 https://\$server_name\$request_uri;
+}
+EOF
+
+# --- Using auth.
+htpasswd -bc /etc/nginx/htpasswd $WEBDAV_USERNAME $WEBDAV_PASSWORD
+# --- Using no auth.
+#sed -i 's%auth_basic "Restricted";% %g' /etc/nginx/http.d/default.conf
+#sed -i 's%auth_basic_user_file /etc/nginx/htpasswd;% %g' /etc/nginx/http.d/default.conf
+
+sudo nginx -t
 ufw allow https
+#ufw status numbered
+#ufw delete 4
+chmod +x /etc/init.d/nginx
+rc-update add nginx
+rc-service nginx restart
+
 
 #https://docs.nextcloud.com/server/latest/user_manual/en/files/access_webdav.html#accessing-files-using-linux
 #echo "In the client side:"
 #echo "  - install davfs2 (sudo apt install davfs2 or apk add davfs2)"
-#echo "  - create the mount directory: mkdir /media/webdav"
+#echo "  - create the mount directory: sudo mkdir /media/webdav"
 #echo "  - create the secrets file: echo '/media/webdav webdav <PASSWORD>' >> /etc/davfs2/secrets"
-#echo "  - update the visibility of the secrets file: chmod 600 /etc/davfs2/secrets"
-#echo "  - update the fstab file: echo 'https://WEBDAV_MACHINE_IP/uploads /media/webdav davfs user,rw,auto 0 0' >> /etc/fstab"
-#mount -t davfs https://WEBDAV_MACHINE_IP/uploads /media/webdav
+#echo "  - update the visibility of the secrets file: sudo chmod 600 /etc/davfs2/secrets"
+#echo "  - update the fstab file: echo 'https://WEBDAV_MACHINE_IP/webdav /media/webdav davfs user,rw,auto 0 0' >> /etc/fstab"
+#mount -t davfs https://WEBDAV_MACHINE_IP /media/webdav
 
 ## ------------------------------------------------------------------------
 # [x] S12 - Install and configure Rclone
